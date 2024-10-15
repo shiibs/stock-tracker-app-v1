@@ -38,6 +38,43 @@ func main() {
 
 	http.HandleFunc("/ws", WSHandler)
 
+	http.HandleFunc("/stocks-history", func(w http.ResponseWriter, r *http.Request) {
+		StockHistoryHandler(w, r, db)
+	})
+
+	http.HandleFunc("stock-candles", func(w http.ResponseWriter, r *http.Request) {
+		CandleHandler(w, r, db)
+	})
+
+}
+
+// Fetch all past candles for all of the symbols
+func StockHistoryHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	var candles []Candle
+	db.Order("timestamp asc").Find(&candles)
+
+	groupData := make(map[string][]Candle)
+
+	for _, candle := range candles {
+		symbol := candle.Symbol
+		groupData[symbol] = append(groupData[symbol], candle)
+	}
+
+	jsonResponse, _ := json.Marshal(groupData)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonResponse)
+}
+
+// Fetch all past candles from a specific symbol
+func CandleHandler(w http.ResponseWriter, r *http.Request, db *gorm.DB) {
+	symbol := r.URL.Query().Get("symbol")
+
+	var candles []Candle
+	db.Where("symbol= ?", symbol).Order("timestamp asc").Find(&candles)
+
+	jsonCandles, _ := json.Marshal(candles)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonCandles)
 }
 
 // Websocket endpoint to connect clients to the latest updates on the symbol they're subscribed to
