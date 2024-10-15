@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
+	"net/http"
 	"sync"
 	"time"
 
@@ -17,6 +19,8 @@ var (
 
 	tempCandles = make(map[string]*TempCandle)
 
+	clientConns = make(map[*websocket.Conn]string)
+
 	mu sync.Mutex
 )
 
@@ -30,6 +34,44 @@ func main() {
 
 	go handleFinnhubMessage(finnhubWSConn, db)
 
+	go broadcastUpdates()
+
+	http.HandleFunc("/ws", WSHandler)
+
+}
+
+// Websocket endpoint to connect clients to the latest updates on the symbol they're subscribed to
+func WSHandler(w http.ResponseWriter, r *http.Request) {
+	// Upgrade incoming GET request into a Websocket connection
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			return true
+		},
+	}
+
+	// Close ws connection & unregister the client when they disconnect
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Panicln("Failed to upgrade connection: ", err)
+	}
+
+	defer conn.Close()
+	defer func() {
+		delete(clientConns, conn)
+		log.Println("Client disconnected")
+	}()
+
+	// Register the new client to the symbol they're subscribing to
+	for {
+		_, symbol, err := conn.ReadMessage()
+		clientConns[conn] = string(symbol)
+		log.Println("New client connected")
+
+		if err != nil {
+			log.Println("Error reading from the client: ", err)
+			break
+		}
+	}
 }
 
 // Connect to finnhub websockets
@@ -47,6 +89,7 @@ func connectToFinnhub(env *Env) *websocket.Conn {
 	return ws
 }
 
+// Handle Finnhub's WebSockets incoming messages
 func handleFinnhubMessage(ws *websocket.Conn, db *gorm.DB) {
 	finnhubMessage := &FinnhubMessage{}
 
@@ -67,6 +110,7 @@ func handleFinnhubMessage(ws *websocket.Conn, db *gorm.DB) {
 	}
 }
 
+// Process each trade and update or create temporary candles
 func processTradeData(trade *TradeData, db *gorm.DB) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -119,5 +163,46 @@ func processTradeData(trade *TradeData, db *gorm.DB) {
 	broadcast <- &BroadcastMessage{
 		UpdateType: Live,
 		Candle:     tempCandle.toCandle(),
+	}
+}
+
+// Send candle updates to clients connected every 1 second at maximum, unless it's a closed candle
+func broadcastUpdates() {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	var latestUpdate *BroadcastMessage
+
+	for {
+		select {
+		case update := <-broadcast:
+			if update.UpdateType == Closed {
+				broadcastToClients(update)
+			} else {
+				latestUpdate = update
+			}
+
+		case <-ticker.C:
+			if latestUpdate != nil {
+				broadcastToClients(latestUpdate)
+			}
+			latestUpdate = nil
+		}
+	}
+}
+
+// Broadcast updates to clients
+func broadcastToClients(update *BroadcastMessage) {
+	jsonUpdate, _ := json.Marshal(update)
+
+	for clientConn, symbol := range clientConns {
+		if update.Candle.Symbol == symbol {
+			err := clientConn.WriteMessage(websocket.TextMessage, jsonUpdate)
+			if err != nil {
+				log.Panicln("Error sending message to client: ", err)
+				clientConn.Close()
+				delete(clientConns, clientConn)
+			}
+		}
 	}
 }
