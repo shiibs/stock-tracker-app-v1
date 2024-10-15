@@ -46,6 +46,8 @@ func main() {
 		CandleHandler(w, r, db)
 	})
 
+	// Serve the endpoints
+	http.ListenAndServe(fmt.Sprintf(":%s", env.SERVER_PORT), nil)
 }
 
 // Fetch all past candles for all of the symbols
