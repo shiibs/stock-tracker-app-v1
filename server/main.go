@@ -42,7 +42,7 @@ func main() {
 		StockHistoryHandler(w, r, db)
 	})
 
-	http.HandleFunc("stock-candles", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/stock-candles", func(w http.ResponseWriter, r *http.Request) {
 		CandleHandler(w, r, db)
 	})
 
@@ -88,12 +88,12 @@ func WSHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	// Close ws connection & unregister the client when they disconnect
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Panicln("Failed to upgrade connection: ", err)
 	}
 
+	// Close ws connection & unregister the client when they disconnect
 	defer conn.Close()
 	defer func() {
 		delete(clientConns, conn)

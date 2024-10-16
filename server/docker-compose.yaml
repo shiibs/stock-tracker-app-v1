@@ -2,40 +2,46 @@ version: "3.9"
 
 services:
   app:
+    tty: true
+    restart: always
+    image: stock-tracker
+    container_name: stock-tracker
     build: .
-    container_name: stock-tracker-app
     ports:
-      - "8080:8080"
-    environment:
-      - DB_HOST=${DB_HOST}
-      - DB_PORT=${DB_PORT}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_NAME=${DB_NAME}
-      - API_KEY=${API_KEY}
-      - SERVER_PORT=${SERVER_PORT}
-    depends_on:
-      - db
+      - 3000:3000
+    env_file:
+      - .env
     networks:
-      - stock-tracker-network
+      - application
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/src/app
+    command: air -c .air.toml
 
   db:
-    image: postgres:13-alpine
+    image: postgres:alpine
     container_name: stock-tracker-db
     environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=${DB_HOST}
+      - POSTGRES_DB=${DB_NAME}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
     ports:
-      - "5432:5432"
+      - 5432:5432
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-db:/var/lib/postgresql/data
     networks:
-      - stock-tracker-network
+      - application
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 networks:
-  stock-tracker-network:
-    driver: bridge
+  application:
 
 volumes:
-  postgres-data:
+  postgres-db:
